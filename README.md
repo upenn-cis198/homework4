@@ -17,6 +17,8 @@ env_logger = "0.5"
 ```
 
 ### Assignment
+This assignment is difficult! Start early!
+
 This will be a minimal implementation of the strace Linux utility. I recommend you
 play around with the utility if you're not familiar.
 
@@ -108,6 +110,14 @@ signals, etc. We will mostly be interested in tracing system calls.
 
 For system calls events, ptrace receives an event before and after a system call,
 we refer to these events as pre-hook and post-hook events.
+
+While the tracee is stopped, we can get it's registers to see the state of the program,
+the system call which was intercepted is defined by the rax register. The arguments to
+the system call are mapped to the following registers: arg1 => rdi, arg2 => rsi,
+arg3 => rdx, arg4 => r10, arg5 => r8, arg6 => r9.
+
+Similarly, the tracer can read/write to arbitrary memory of the tracee (this is how
+my `read_string` function works.
 
 ### Input
 Your program will take the executable and arguments for another program through
@@ -224,14 +234,14 @@ Additionally you must print the string argument for the following system calls:
 
 Aside: It is not enough for your code to work, it should be well written, idiomatic,
 logically separated, and modular. Even if every works, you **will not** receive an A on
-this assignment if your code is badly written, e.g. if-else cascades, one giant main
+this assignment if your code is terribly written, e.g. if-else cascades, one giant main
 function.
 
 **NOTE**: You must propagate all nix::Result errors up to main using '?', do not use
 unwrap or expect on these, you may use unwrap or expect on **other** types of error though.
 
 ### Nix
-We will use the nix trait for their ptrace bindings. Specifically you should become
+We will use the nix crate for their ptrace bindings. Specifically you should become
 best friends with `nix::sys::wait::WaitStatus` enum as you will need to handle all
 the cases in this enum.
 
