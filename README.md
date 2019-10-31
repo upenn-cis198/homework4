@@ -112,7 +112,7 @@ For system calls events, ptrace receives an event before and after a system call
 we refer to these events as pre-hook and post-hook events.
 
 While the tracee is stopped, we can get it's registers to see the state of the program,
-the system call which was intercepted is defined by the rax register. The arguments to
+the system call which was intercepted is defined by the `orig_rax` field, notice this isn't a real CPU register but a Linux quirk. The arguments to
 the system call are mapped to the following registers: arg1 => rdi, arg2 => rsi,
 arg3 => rdx, arg4 => r10, arg5 => r8, arg6 => r9.
 
@@ -245,7 +245,7 @@ We will use the nix crate for their ptrace bindings. Specifically you should bec
 best friends with `nix::sys::wait::WaitStatus` enum as you will need to handle all
 the cases in this enum.
 
-I have implemented a couple of utility functions, which are quite difficult to write:
+I have implemented a couple of utility functions, which are difficult to write:
 
 ```rust
 /// Given an address in a tracee process specified by pid, read a string at
@@ -296,7 +296,7 @@ The child should do the following things:
 4) Child calls execvp to run process.
 
 The parent should do the following things.
-1) Wait for child to be ready by calling waitpid on it's pid.
+1) Wait for child to be ready by calling waitpid on it's pid (this waits on the child to send the SIGSTOP to itself (see child actions above)).
 2) Call ptrace_set_options (provided by me) to properly set up ptrace to track all the
    events we're interested in.
 3) Call ptrace(syscall, child_pid) to let it continue (step #3 on the child).
@@ -338,7 +338,7 @@ Notice a few things:
 This works fine for a single process, but won't scale to multiple processes.
 For this you will need a few more things:
 1) You cannot just break out of the loop when a single process exits. You must know all
-   live processes are done, will need to keep track of this. I recommend a HashSet.
+   live processes are done, we will need to keep track of this. I recommend a HashSet.
    You should add new processes when you see them, for simplicity, do this at the
     SystemCallEvent branch. Delete it once it has exited.
 2) A single boolean isn't enough to keep track of the post-hook/pre-hook events, you
