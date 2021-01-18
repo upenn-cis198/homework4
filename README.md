@@ -1,3 +1,5 @@
+# Warning: This assignment is not yet updated for spring 2021 and may change substantially.
+
 ## A Rust Stracer
 
 A rust strace utility, for logging all system calls a program produces.
