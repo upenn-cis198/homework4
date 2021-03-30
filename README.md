@@ -5,7 +5,8 @@ A Rust `strace` utility, for logging all system calls a program produces.
 ### Setup
 
 You will find files: `util.rs` and `system_call_names.rs` which contains functions
-you will need. These should be copied over to your `src/` directory.
+you will need.
+You should add additional files in your `src` directory to implement the rest of the assignment.
 
 You will need the following crates (in your `Cargo.toml`). Please use the specified versions:
 ```
