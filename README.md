@@ -1,33 +1,43 @@
-# Warning: This assignment is not yet updated for spring 2021 and may change substantially.
+# A Rust Stracer
 
-## A Rust Stracer
-
-A rust strace utility, for logging all system calls a program produces.
+A Rust `strace` utility, for logging all system calls a program produces.
 
 ### Setup
+
 You will find files: `util.rs` and `system_call_names.rs` which contains functions
 you will need. These should be copied over to your `src/` directory.
 
-You will need the following crates. Please use the specified versions:
+You will need the following crates (in your `Cargo.toml`). Please use the specified versions:
 ```
-nix = "0.10"
-libc = "0.2"
-structopt = "0.2"
-byteorder = "1"
-log = "0.4"
-env_logger = "0.5"
+nix = "0.20.0"
+libc = "0.2.92"
+structopt = "0.3.21"
+byteorder = "1.4.3"
+log = "0.4.14"
+env_logger = "0.8.3"
 ```
 
 ### Assignment
+
 This assignment is difficult! Start early!
+This will be a minimal implementation of the `strace` Linux utility. We recommended that you
+play around with the utility if you're not familiar: just run `strace` followed by any command or program, and it will show what system calls that program is making. For example:
+```
+strace echo "hello"
+strace cargo build
+strace python3 my_python_program.py
+strace ls -alh
+```
 
-This will be a minimal implementation of the strace Linux utility. I recommend you
-play around with the utility if you're not familiar.
+Or even:
+```
+strace strace echo "hello"
+```
 
-Our stracer will intercept all system call that a program makes, here a "program" is
+Our stracer will intercept all system call that a program makes.
+Here a "program" is
 understood as: a tree of processes, possibly running in parallel, possibly spawning
 children. A sample output will look like:
-
 ```
 $> cargo run ls
 [11364]: rt_sigprocmask() = 0
@@ -96,34 +106,36 @@ total 48K
 ...
 ```
 
-Only outputs `read` and `lstat` calls.
+The above only outputs `read` and `lstat` calls.
 
 ### Background
+
 `ptrace` is the underlying system call which allows us to trace other processes
-executions. Just like in the previous Rust shell assignment, there will be a parent
+executions.
+We will write our tracer with two processes: a parent
 process (this is the tracer which will print events) and a child process (the tracee)
 which calls `execve` based on the passed command.
-
 The tracer acts like a daemon, waiting for event to come from the tracee. The tracee
 is stopped while the tracer handles the event.
 
-A few types of events cause ptrace stops: system calls, clone events, exit event,
+A few types of events cause `ptrace` stops: system calls, clone events, exit event,
 signals, etc. We will mostly be interested in tracing system calls.
 
-For system calls events, ptrace receives an event before and after a system call,
+For system calls events, `ptrace` receives an event before and after a system call,
 we refer to these events as pre-hook and post-hook events.
 
 While the tracee is stopped, we can get it's registers to see the state of the program,
 the system call which was intercepted is defined by the `orig_rax` field, notice this isn't a real CPU register but a Linux quirk. The arguments to
-the system call are mapped to the following registers: arg1 => rdi, arg2 => rsi,
-arg3 => rdx, arg4 => r10, arg5 => r8, arg6 => r9.
+the system call are mapped to the following registers: `arg1 => rdi`, `arg2 => rsi`,
+`arg3 => rdx`, `arg4 => r10`, `arg5 => r8`, `arg6 => r9`.
 
 Similarly, the tracer can read/write to arbitrary memory of the tracee (this is how
-my `read_string` function works.
+the provided `read_string` function works, described below.)
 
 ### Input
+
 Your program will take the executable and arguments for another program through
-the command line. We will use the rust crate (structopt)[https://docs.rs/structopt/0.2.12/structopt/] for argument parsing, please see section below.
+the command line. As we did in homework2, we will use the rust crate (structopt)[https://docs.rs/structopt/0.2.12/structopt/] for argument parsing, please see section below.
 
 Running the program with no arguments returns a helpful message of what the input
 should look like:
@@ -179,6 +191,7 @@ Unfortunately the ordering of commands with optional flags is a little awkward:
 More information is given below on the structopt section.
 
 ### Output
+
 The output should be as shown in the examples above. Do not worry about small
 differences in whitespace, but in general it should look like the examples provided.
 
@@ -197,7 +210,7 @@ Most system calls return a result status as an argument, but not all. Consider:
 [11942]: mmap() = 0x695ef000
 ```
 
-mmap returns the address of memory that was mapped, so we follow a simple heuristic:
+`mmap` returns the address of memory that was mapped, so we follow a simple heuristic:
 If the absolute value of a return value is above 10,000 we assume it is an address and
 print it using hexadecimal format.
 
@@ -206,8 +219,7 @@ logger to debug this program.
 
 Please use `env_logger` (same as last assignment) to print helpful messages about what
 is happening in your code. Use the `info!` macro to print extra messages. An example
-output of my logger is:
-
+expected output of the logger is below:
 ```
 $> RUST_LOG=stracer=info cargo run ls
  INFO 2018-10-16T17:14:56Z: stracer: Pre-hook event. Nothing to do.
@@ -226,7 +238,7 @@ $> RUST_LOG=stracer=info cargo run ls
  ```
 
 Your logger should similarly print messages for the following events:
-pre-hook events, post-hook events, exit, signaled, ptrace events, stopped, etc.
+pre-hook events, post-hook events, exit, signaled, `ptrace` events, stopped, etc.
 For example: `info!("[{}] Process Killed by Signal {:?}", pid, signal);`
 
 Additionally you must print the string argument for the following system calls:
@@ -234,18 +246,21 @@ Additionally you must print the string argument for the following system calls:
 
 ## Design and Implementation
 
-Aside: It is not enough for your code to work, it should be well written, idiomatic,
-logically separated, and modular. Even if every works, you **will not** receive an A on
-this assignment if your code is terribly written, e.g. if-else cascades, one giant main
+Make sure that you run `cargo clippy` and `cargo fmt` and deal with all warnings (yellow text, not just red text) before submitting.
+
+It is not enough for your code to work; it should be well written, idiomatic,
+logically separated, and modular. Please do not use giant if-else cascades or one giant main
 function.
 
-**NOTE**: You must propagate all nix::Result errors up to main using '?', do not use
-unwrap or expect on these, you may use unwrap or expect on **other** types of error though.
-
 ### Nix
+
 We will use the nix crate for their ptrace bindings. Specifically you should become
 best friends with `nix::sys::wait::WaitStatus` enum as you will need to handle all
 the cases in this enum.
+
+**Important Note:**
+You must propagate all `nix::Result` errors up to main using `?`; do not use
+unwrap or expect on these. You may use unwrap or expect on other types of error though.
 
 I have implemented a couple of utility functions, which are difficult to write:
 
@@ -263,46 +278,49 @@ pub fn get_regs(pid: Pid) -> user_regs_struct;
 You will find these useful.
 
 ### Structopt
+
 Structopt allows us to declare a struct which specifies our program's command line
 arguments. Structopt takes care of the parsing, and returns an instance of this struct
-which we can simply `instance.field` to get the arguments. Familiarize yourself with
-this crate and create the command line arguments as specified in the input section.
+which we can simply `instance.field` to get the arguments.
+You should already be familiar with `Structopt` from homework2.
 
 Please put this struct in it's own module and file called `args.rs`. Declare a type
 called `Opt` which defines your command line args. You may find the structopt
-per field attributes: "short", "long", "conflicts_with", useful.
+per field attributes: `short`, `long`, `conflicts_with`, useful.
 
 Notice the type of the field tells structopt how to parse the commands. My `dont_trace`,
 and `to_trace` are of type `Vec<String>`.
 
 ### Byteorder
-The byteorder trait is used by my provided `util.rs` code, not need to worry about it.
 
+The byteorder trait is used by the provided `util.rs` code; no need to worry about it.
 
 ### Using Ptrace
-Ptrace is quite complicated. I will attempt to give some brief pointers here, in class
+
+`ptrace` is quite complicated. I will attempt to give some brief pointers here, in class
 I will cover the general algorithm.
 
 The tracee starts in a stopped state waiting for the tracer to let it continue.
-In general we use ptrace(syscall) to allow the tracee to continue, after that we wait
-for the next ptrace event using waitpid, waitpid returns a WaitStatus which we can match
+In general we use `ptrace(syscall)` to allow the tracee to continue, after that we wait
+for the next `ptrace` event using `waitpid`, `waitpid` returns a `WaitStatus` which we can match
 on to do many things based on the type of event.
 
 #### Starting ptrace
+
 The child should do the following things:
-1) Call ptrace traceme() to set itself up for being traced.
-2) Call raise(SIGSTOP) this basically has the child stop itself until the tracer is ready.
+1. Call `ptrace traceme()` to set itself up for being traced.
+2. Call `raise(SIGSTOP)` --- this basically has the child stop itself until the tracer is ready.
    This ensures the tracer has time to get set up, otherwise there is a race condition
    between parent and child. Notice child is stopped here.
-3) Child is continued by parent... (See parent actions below)
-4) Child calls execvp to run process.
+3. Child is continued by parent... (See parent actions below)
+4. Child calls `execvp` to run process.
 
 The parent should do the following things.
-1) Wait for child to be ready by calling waitpid on it's pid (this waits on the child to send the SIGSTOP to itself (see child actions above)).
-2) Call ptrace_set_options (provided by me) to properly set up ptrace to track all the
+1. Wait for child to be ready by calling `waitpid` on it's `pid` (this waits on the child to send the `SIGSTOP` to itself (see child actions above)).
+2. Call `ptrace_set_options` (provided by me) to properly set up `ptrace` to track all the
    events we're interested in.
-3) Call ptrace(syscall, child_pid) to let it continue (step #3 on the child).
-4) From here the parent and child are ready to work together to trace system calls.
+3. Call `ptrace(syscall, child_pid)` to let it continue (step 3 on the child).
+4. From here the parent and child are ready to work together to trace system calls.
 
 You should set your system tracing loop as follows:
 ```rust
@@ -328,42 +346,42 @@ loop {
     // Allow this process to continue running and loop around for next event.
     ptrace(syscall, actual_pid);
 }
-
 ```
 
 Notice a few things:
 - There is no difference between a post-hook event and a pre-hook event,
-  you will have to keep track of this using bool, alternating between them as
-  SystemCallEvent come.
-- When does this loop end? When we hit the Exited even you can break out of the loop.
+  you will have to keep track of this using `bool`, alternating between them as
+  `SystemCallEvent` come.
+- When does this loop end? When we hit the `Exited` even you can break out of the loop.
 
 This works fine for a single process, but won't scale to multiple processes.
 For this you will need a few more things:
-1) You cannot just break out of the loop when a single process exits. You must know all
-   live processes are done, we will need to keep track of this. I recommend a HashSet.
+1. You cannot just break out of the loop when a single process exits. You must know all
+   live processes are done, we will need to keep track of this. We recommend a `HashSet`.
    You should add new processes when you see them, for simplicity, do this at the
-    SystemCallEvent branch. Delete it once it has exited.
-2) A single boolean isn't enough to keep track of the post-hook/pre-hook events, you
-   will need a boolean per live process, I recommend a HashMap for this. As in #1, for
-   never seen processes add an entry in PtraceSyscall with the starting value for
+    `SystemCallEvent` branch. Delete it once it has exited.
+2. A single boolean isn't enough to keep track of the post-hook/pre-hook events; you
+   will need a boolean per live process. recommend a `HashMap` for this. As in (1), for
+   never seen processes add an entry in `PtraceSyscall` with the starting value for
    pre-hook event.
 
 An easy command to run which spawns child processes is `bash -c "ls"` if that works,
 you can try slightly more complicated variant: `bash -c "ls && ls -ahl"`.
 
-**Note**: Getting ptrace to work for all processes is very difficult! For example,
+**Note**: Getting `ptrace` to work for all processes is very difficult! For example,
 our implementation does not properly propagate signals. Do not expect your final solution
 to work for all programs.
 
 ## Recommended Steps for implementation
-1) Start with a simple command (say ls), and hard code this command into the child. Ensure
-   you're able to properly ptrace the child, iterating through it's system calls all
-   the way to completion. The only ptrace events you should need to handle at this step
-   is the Exited and PtraceSyscall event.
-2) Implement the command line argument options to allow arbitrary processes to be passed
+
+1. Start with a simple command (say `ls`), and hard code this command into the child. Ensure
+   you're able to properly `ptrace` the child, iterating through it's system calls all
+   the way to completion. The only `ptrace` events you should need to handle at this step
+   is the `Exited` and `PtraceSyscall` event.
+2. Implement the command line argument options to allow arbitrary processes to be passed
    in along with that process's command line arguments. You should only attempt to run
    programs which themselves don't fork, like `ls`.
-3) Implement multi-processing, this requires a few extensions as explained above. You
+3. Implement multi-processing, this requires a few extensions as explained above. You
    must be able to handled arbitrary events from arbitrary processes.
-4) Lastly, add the functionality to print only specific events based on what the user
-   provided, I found the HashSet useful for this task.
+4. Lastly, add the functionality to print only specific events based on what the user
+   provided. I found the `HashSet` useful for this task.
