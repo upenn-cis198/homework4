@@ -1,16 +1,11 @@
 use byteorder::{LittleEndian, WriteBytesExt};
-
-use nix;
-use libc::{c_void, user_regs_struct, PT_NULL};
-use nix::sys::ptrace;
-use nix::sys::ptrace::*;
-use nix::unistd::*;
-use std::ptr;
-use std::mem;
+use libc::{c_long, user_regs_struct};
+use nix::sys::ptrace::{self, AddressType, Options};
+use nix::unistd::Pid;
 
 /// Given an address in a tracee process specified by pid, read a string at
 /// that address.
-pub fn read_string(address: *mut c_void, pid: Pid) -> String {
+pub fn read_string(pid: Pid, address: AddressType) -> String {
     let mut string = String::new();
     // Move 8 bytes up each time for next read.
     let mut count = 0;
@@ -18,19 +13,19 @@ pub fn read_string(address: *mut c_void, pid: Pid) -> String {
 
     'done: loop {
         let mut bytes: Vec<u8> = vec![];
-        let res = unsafe {
-            #[allow(deprecated)]
-            ptrace::ptrace(Request::PTRACE_PEEKDATA,
-                           pid,
-                           address.offset(count),
-                           ptr::null_mut()).unwrap()
-        };
+        let address = unsafe { address.offset(count) };
 
-        bytes.write_i64::<LittleEndian>(res).unwrap();
+        let res: c_long = ptrace::read(pid, address).unwrap_or_else(|err| {
+            panic!("Failed to read data for pid {}: {}", pid, err);
+        });
+        bytes.write_i64::<LittleEndian>(res).unwrap_or_else(|err| {
+            panic!("Failed to write {} as i64 LittleEndian: {}", res, err);
+        });
+
         for b in bytes {
             if b != 0 {
                 string.push(b as char);
-            }else{
+            } else {
                 break 'done;
             }
         }
@@ -50,23 +45,10 @@ pub fn ptrace_set_options(pid: Pid) -> nix::Result<()> {
     ptrace::setoptions(pid, options)
 }
 
-/// Nix does not yet have a way to fetch registers. We use our own instead.
-/// Given the pid of a process that is currently being traced. Return the registers
+/// Given the pid of a process that is currently being traced, return the registers
 /// for that process.
 pub fn get_regs(pid: Pid) -> user_regs_struct {
-    unsafe {
-        let mut regs: user_regs_struct = mem::uninitialized();
-
-        #[allow(deprecated)]
-        let res = ptrace::ptrace(
-            Request::PTRACE_GETREGS,
-            pid,
-            PT_NULL as *mut c_void,
-            &mut regs as *mut _ as *mut c_void,
-        );
-        match res {
-            Ok(_) => regs,
-            Err(e) => panic!("Get regs failed: {:?}", e),
-        }
-    }
+    ptrace::getregs(pid).unwrap_or_else(|err| {
+        panic!("Get regs failed: {:?}", err);
+    })
 }

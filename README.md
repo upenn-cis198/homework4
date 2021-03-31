@@ -6,9 +6,12 @@ A Rust `strace` utility, for logging all system calls a program produces.
 
 You will find files: `util.rs` and `system_call_names.rs` which contains functions
 you will need.
-You should add additional files in your `src` directory to implement the rest of the assignment.
+To start the assignment, run `Cargo init` to initialize your code with Cargo.
+I've also added `rustfmt.toml`, feel free to modify or delete it for
+different `cargo fmt` formatting settings.
+Then add additional files in your `src` directory to implement the rest of the assignment.
 
-You will need the following crates (in your `Cargo.toml`). Please use the specified versions:
+You will need to import the following crates in your `Cargo.toml` (under `[dependencies]`). Please use the specified versions:
 ```
 nix = "0.20.0"
 libc = "0.2.92"
@@ -263,16 +266,14 @@ the cases in this enum.
 You must propagate all `nix::Result` errors up to main using `?`; do not use
 unwrap or expect on these. You may use unwrap or expect on other types of error though.
 
-I have implemented a couple of utility functions, which are difficult to write:
-
+We have provided a couple of utility functions, which are difficult to write:
 ```rust
 /// Given an address in a tracee process specified by pid, read a string at
 /// that address.
-pub fn read_string(address: *mut c_void, pid: Pid) -> String;
+pub fn read_string(pid: Pid, address: AddressType) -> String;
 
-/// Nix does not yet have a way to fetch registers. We use our own instead.
-/// Given the pid of a process that is currently being traced. Return the registers
-/// for that process.
+/// Given the pid of a process that is currently being traced,
+/// return the registers for that process.
 pub fn get_regs(pid: Pid) -> user_regs_struct;
 ```
 
@@ -289,7 +290,7 @@ Please put this struct in it's own module and file called `args.rs`. Declare a t
 called `Opt` which defines your command line args. You may find the structopt
 per field attributes: `short`, `long`, `conflicts_with`, useful.
 
-Notice the type of the field tells structopt how to parse the commands. My `dont_trace`,
+Notice the type of the field tells structopt how to parse the commands. Our `dont_trace`,
 and `to_trace` are of type `Vec<String>`.
 
 ### Byteorder
@@ -298,8 +299,8 @@ The byteorder trait is used by the provided `util.rs` code; no need to worry abo
 
 ### Using Ptrace
 
-`ptrace` is quite complicated. I will attempt to give some brief pointers here, in class
-I will cover the general algorithm.
+`ptrace` is quite complicated. We will attempt to give some brief pointers here.
+We will go over this in more detail in class.
 
 The tracee starts in a stopped state waiting for the tracer to let it continue.
 In general we use `ptrace(syscall)` to allow the tracee to continue, after that we wait
@@ -385,4 +386,4 @@ to work for all programs.
 3. Implement multi-processing, this requires a few extensions as explained above. You
    must be able to handled arbitrary events from arbitrary processes.
 4. Lastly, add the functionality to print only specific events based on what the user
-   provided. I found the `HashSet` useful for this task.
+   provided. `HashSet` is useful for this task.
