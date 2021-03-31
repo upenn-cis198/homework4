@@ -45,8 +45,8 @@ pub fn ptrace_set_options(pid: Pid) -> nix::Result<()> {
     ptrace::setoptions(pid, options)
 }
 
-/// Given the pid of a process that is currently being traced, return the registers
-/// for that process.
+/// Given the pid of a process that is currently being traced,
+/// return the registers for that process.
 pub fn get_regs(pid: Pid) -> user_regs_struct {
     ptrace::getregs(pid).unwrap_or_else(|err| {
         panic!("Get regs failed: {:?}", err);
