@@ -1,3 +1,9 @@
+// Modules for this assignment
+// (You only need to edit args.rs and main.rs)
+mod args;
+mod system_call_names;
+pub mod util;
+
 // The command line struct from args.rs
 // use args::Opt;
 
