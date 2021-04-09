@@ -2,29 +2,44 @@
 
 A Rust `strace` utility, for logging all system calls a program produces.
 
+## Overview
+
+This is intended to be a shorter assignment, with most of the code provided for you.
+The main goal is to familiarize yourself with some process and system call handling in Rust,
+as provided by the `nix` crate.
+In particular:
+
+- Spawning subprocesses with `execvp`, `fork`, `ForkResult`, and `Pid`
+
+- Waiting on processes with `waitpid` and `WaitStatus`
+
+- Tracing processes with `ptrace`
+
+There is some optional extra credit at the end of the assignment.
+
 ### Setup
 
-You will find files: `util.rs` and `system_call_names.rs` which contains functions
-you will need.
-To start the assignment, run `Cargo init` to initialize your code with Cargo.
-I've also added `rustfmt.toml`, feel free to modify or delete it for
-different `cargo fmt` formatting settings.
-Then add additional files in your `src` directory to implement the rest of the assignment.
+The following files are provided: `main.rs`, `util.rs`, `system_call_names.rs`,
+and `args.rs`.
+Of these, you will be working on implementing the functionality in
+`main.rs` and `args.rs`; you shouldn't need to modify the other two.
 
+To start the assignment, run `Cargo init` to initialize the repository with Cargo.
+There is already a `src` folder but you need `Cargo.toml`.
 You will need to import the following crates in your `Cargo.toml` (under `[dependencies]`). Please use the specified versions:
 ```
 nix = "0.20.0"
 libc = "0.2.92"
 structopt = "0.3.21"
 byteorder = "1.4.3"
-log = "0.4.14"
-env_logger = "0.8.3"
 ```
 
-### Assignment
+I've also added `rustfmt.toml`, feel free to modify or delete it for
+different `cargo fmt` formatting settings.
 
-This assignment is difficult! Start early!
-This will be a minimal implementation of the `strace` Linux utility. We recommended that you
+### Input and Output
+
+This assignment is a minimal implementation of the `strace` Linux utility. We recommend that you
 play around with the utility if you're not familiar: just run `strace` followed by any command or program, and it will show what system calls that program is making. For example:
 ```
 strace echo "hello"
@@ -43,7 +58,7 @@ Here a "program" is
 understood as: a tree of processes, possibly running in parallel, possibly spawning
 children. A sample output will look like:
 ```
-$> cargo run ls
+$> cargo run -- ls
 [11364]: rt_sigprocmask() = 0
 [11364]: execve("/home/gatowololo/.cargo/bin/ls") = -2
 [11364]: execve("/home/gatowololo/.cargo/bin//ls") = -2
@@ -73,14 +88,17 @@ Cargo.lock  Cargo.toml  src  target
 [11364]: exit_group() = Process finished!
 ```
 
-Here we're stracing `ls` notice we have the pid on the left column, the system call
-intercepted, some system calls will print their string argument, and all system calls
+Here we're stracing `ls` notice we have the pid (Process ID)
+on the left column (formatted as `[pid]`),
+the system call intercepted,
+some system calls will print their string argument, and all system calls
 have their return status next to them.
 
 Our program will also allow the user to specify which system calls to intercept, or
-which to ignore, for example:
+which to ignore.
+For example, the below only outputs `read` and `lstat` calls:
 ```
-$> ./target/debug/stracer ls --to_trace lstat read -- -ahl
+$> cargo run -- ls --to_trace lstat read -- -alh
 [11547]: read() = 832
 [11547]: read() = 832
 [11547]: read() = 832
@@ -110,59 +128,71 @@ total 48K
 ...
 ```
 
-The above only outputs `read` and `lstat` calls.
+When passing arguments to `cargo run`, remember that `--`
+separates arguments to `cargo` from arguments used by our Rust program.
+Above, we are using a second `--` to separate additional arguments to be passed
+to the command we are running.
+So the pattern is `cargo run -- <command to trace> <arguments to stracer> -- <arguments to command>`.
 
-### Background
+## Background
 
-`ptrace` is the underlying system call which allows us to trace other processes
+### Ptrace
+
+To implement the tracer, we rely on
+`ptrace`, a special system call which allows us to trace other processes
 executions.
 We will write our tracer with two processes: a parent
 process (this is the tracer which will print events) and a child process (the tracee)
-which calls `execve` based on the passed command.
+which executes the passed command.
 The tracer acts like a daemon, waiting for event to come from the tracee. The tracee
 is stopped while the tracer handles the event.
 
 A few types of events cause `ptrace` stops: system calls, clone events, exit event,
 signals, etc. We will mostly be interested in tracing system calls.
+For system calls events, `ptrace` receives an event **before and after a system call; we refer to these events as pre-hook and post-hook events.**
+So you will be notified of a `ptrace` stop twice for each system call,
+not just once.
+In `util.rs`, we have provided code which traces the system call
+at the beginning and end:
+`handle_pre_syscall` and `handle_post_syscall`.
 
-For system calls events, `ptrace` receives an event before and after a system call,
-we refer to these events as pre-hook and post-hook events.
+### Nix
 
-While the tracee is stopped, we can get it's registers to see the state of the program,
-the system call which was intercepted is defined by the `orig_rax` field, notice this isn't a real CPU register but a Linux quirk. The arguments to
-the system call are mapped to the following registers: `arg1 => rdi`, `arg2 => rsi`,
-`arg3 => rdx`, `arg4 => r10`, `arg5 => r8`, `arg6 => r9`.
+Process management is done with the `nix` crate.
+To help you filter out the parts of the `nix` API
+and the standard library that are relevant,
+in `main.rs` we have imported
+exactly the functions that we use in our implementation
+(commented out to suppress errors):
+```
+use nix::sys::ptrace;
+use nix::sys::signal::{raise, Signal};
+use nix::sys::wait::{waitpid, WaitStatus};
+use nix::unistd::{execvp, fork, ForkResult, Pid};
+use std::collections::HashMap;
+use std::collections::HashSet;
+use std::error::Error;
+use std::ffi::CString;
+```
 
-Similarly, the tracer can read/write to arbitrary memory of the tracee (this is how
-the provided `read_string` function works, described below.)
+Specifically, you should become
+best friends with `nix::sys::wait::WaitStatus` enum as you will need to handle all
+the cases in this enum.
 
-### Input
+**Important Note:**
+You must propagate all `nix::Result` errors up to main using `?`; do not use
+`unwrap` or `expect` on these. You may use `unwrap` or `expect` on other types of error though.
+
+## Detailed Instructions
+
+### Step 1: Parse command line arguments
 
 Your program will take the executable and arguments for another program through
-the command line. As we did in homework2, we will use the rust crate (structopt)[https://docs.rs/structopt/0.2.12/structopt/] for argument parsing, please see section below.
+the command line. As we did in homework2, we will use the rust crate (structopt)[https://docs.rs/structopt/0.2.12/structopt/] for argument parsing.
 
-Running the program with no arguments returns a helpful message of what the input
-should look like:
-```bash
-$> ./target/debug/stracer
-error: The following required arguments were not provided:
-    <exe>
-
-USAGE:
-    stracer [OPTIONS] <exe> [--] [exe_args]...
-
-For more information try --help
-```
-
-That is, a command to our program looks like: `./stracer <exe> [--] [exe_args]`, that
-is, a mandatory executable file, with optional arguments to `exe` separated by `--`.
-
-Some valid example commands could be:
-```
-./stracer ls
-./stracer ls -- -ahl
-```
-
+Inside `args.rs`,
+the command line arguments struct `Opt`, deriving `StructOpt`,
+is provided for you.
 Running the program with `--help` returns:
 ```
 ./target/debug/stracer --help
@@ -186,44 +216,169 @@ ARGS:
     <exe_args>...
 ```
 
-Specifically the options flags which allow us select which system calls to trace
-or which ones not to trace. These two flags cannot be used together.
+As shown above, there are only four command-line arguments,
+`to_trace`, `dont_trace`, `exe`, and `exe_args`.
+Of the first two, at most one should be provided:
+if `to_trace` is provided, it lists a set of system call names to trace
+(i.e. ignore all others),
+and if `dont_trace` is provided, it lists a set of system call names to
+NOT trace (i.e. trace all others).
+Finally, `exe` gives the name of the command to trace (e.g. `ls`),
+and `exe_args` gives the list of arguments to that command (e.g. `["-alh"]`).
 
-Unfortunately the ordering of commands with optional flags is a little awkward:
-`./target/debug/stracer ls --dont_trace read -- -ahl`
+- Please implement the function
+`validate`, which checks that the input arguments are correct:
+in particular that all the system call names are valid names in
+`system_call_names.rs`.
+Use the `InvalidOption` struct to indicate an error.
 
-More information is given below on the structopt section.
+- Also, implement `Display` for `InvalidOption`.
 
-### Output
+- Finally implement `syscalls_to_trace`, which returns a `HashSet`
+  of the system calls to be traced by the call; this should make use of
+  `to_trace`, `dont_trace`, and the list of system call names in
+  `system_call_names.rs`.
+  If neither `to_trace` or `dont_trace` is provided,
+  return the set of all system calls.
 
-The output should be as shown in the examples above. Do not worry about small
-differences in whitespace, but in general it should look like the examples provided.
+In the `main()` function in `main.rs`, add code which initializes the command
+line options struct from the command line arguments (StructOpt's `::from_args()`),
+then use your `.validate()` function with `?` to propagate any errors.
 
-In this repo, is also a file sample_output.txt showing what the output for a full run
-looks like. Notice the output of our tool can be intertwined with the output of the
-program running, this is okay.
+You can also print out the command line arguments to see that they are being parsed correctly, and print out your `syscalls_to_trace` to see that it is working.
 
-Most system calls return a result status as an argument, but not all. Consider:
+### Step 2: Implement the trace-ee (execute a subprocess)
+
+Inside `main.rs`, you have three functions to implement:
+`main()`, `run_tracee`, and `run_tracer`.
+
+For this part, inside `main()` (after command line arguments are parsed and validated), use the unsafe **fork** function (`nix::unistd::fork`) to fork into a child and a parent; call `run_tracer` on the parent, and `run_tracee` on the child.
+
+The child should do the following things:
+
+1. Call `ptrace traceme()` to set itself up for being traced.
+
+2. Raise the `SIGSTOP` signal (see `nix::sys::signal::{raise, Signal};`).
+   This basically has the child stop itself until the tracer is ready.
+   This ensures the tracer has time to get set up, otherwise there is a race condition
+   between parent and child.
+
+3. Once the child is continued by the parent, use the `execvp` function
+   (this is one of the variants of the `exec` system call)
+   to execute the child process from a command and list of arguments.
+   See documentation [here](https://docs.rs/nix/0.20.0/nix/unistd/fn.execv.html)
+
+   To call `execvp` you first need to convert the string arguments
+   to `CString`, to ensure they are valid C strings.
+   The type `std::ffi::CString` is imported for you.
+   See `CString::new`.
+
+### Step 3: Implement the tracer (trace a subprocess)
+
+The last function to implement is `run_tracer`.
+As we saw in (2) above,
+the tracee starts in a stopped state waiting for the tracer to let it continue.
+In general we use `ptrace(syscall)` to allow the tracee to continue, after that we wait
+for the next `ptrace` event using `waitpid`, `waitpid` returns a `WaitStatus` which we can match
+on to do many things based on the type of event.
+
+`waitpid` is called like: `waitpid(child pid, None)` or,
+to wait on ANY child process ID, `wiatpid(None, None)`.
+See [documentation](https://docs.rs/nix/0.20.0/nix/sys/wait/fn.waitpid.html).
+
+The parent should do the following things.
+
+1. Wait for child to be ready by calling `waitpid` on it's `pid` (this waits on the child to send the `SIGSTOP` to itself (see child actions above)).
+
+2. Call `ptrace_set_options` (provided to you in `util`) to properly set up `ptrace` to track all the events we're interested in.
+
+3. Call `ptrace(syscall, child_pid)` to let it continue (step 3 on the child).
+
+4. In a loop, repeatedly wait using `waitpid` on ANY child process ID.
+For this you should set up a tracing loop like this:
+```Rust
+loop {
+    // Wait for any event from any tracee to come.
+    let actual_pid = match waitpid(None, None) {
+      // Handle all WaitStatus events.
+      Event1 => {
+       ...
+      }
+
+      // The current process has exited.
+      Exited => {
+
+      }
+
+      // A system call event.
+      SystemCallEvent => {
+          // This is the important part
+      }
+    }
+
+    // Allow this process to continue running and loop around for next event.
+    ptrace::syscall(pid, None);
+}
 ```
-[11942]: close() = 0
-[11942]: openat() = -2
-[11942]: openat() = -2
-[11942]: openat() = -2
-[11942]: openat() = 3
-[11942]: fstat() = 0
-[11942]: mmap() = 0x695ef000
+
+Notice a few things:
+
+- There is no difference between a post-hook event and a pre-hook event,
+  you will have to keep track of this using `bool`, alternating between them as
+  `SystemCallEvent` come.
+
+- When does this loop end? When we hit the `Exited` you can break out of the loop.
+
+To process the system call events,
+you will need `extract_syscall_name` (provided in `util`)
+to get the system call name.
+You can start out just by printing out to see how it looks.
+Then
+use
+`handle_pre_syscall` to process pre-hook events
+and `handle_post_syscall` to process post-hook events.
+
+- Make sure you ONLY process the system call names that are being traced (in the given hash set that you computed from the command line arguments in step 1).
+
+- Besides `extract_syscall_name`, you also need `get_regs` (provided in `util`)
+  to pass to the `handle_pre_syscall` and `handle_post_syscall` tracing functions.
+
+- All of the actual tracing is done for you in these functions, but take a look if you are interested; it involves parsing the registers of the subprocess to get the arguments and return value of each system call. There are also more details under "technical details" below.
+
+## Design and Implementation
+
+Make sure that you run `cargo clippy` and `cargo fmt` and deal with all warnings (yellow text, not just red text) before submitting.
+
+**Unit tests are not required for this assignment.**
+It is very difficult to unit test this type of code, instead
+you should rely on running examples to make sure they work,
+and logging or `println!` statements to debug.
+
+## Extra Credit
+
+### Extra Credit 1 (20pts): Logging
+
+Use `env_logger` to print helpful messages about what
+is happening in your code. Use the `info!` macro to print extra messages.
+Add the following to your `Cargo.toml`:
+
+```
+log = "0.4.14"
+env_logger = "0.8.3"
 ```
 
-`mmap` returns the address of memory that was mapped, so we follow a simple heuristic:
-If the absolute value of a return value is above 10,000 we assume it is an address and
-print it using hexadecimal format.
+Once these are important, all you have to do to add logging is import
+the logging function you want, typically
+`use log::info;`
+then use the `info!` macro:
+```Rust
+info!("{This is a logging statement with formatting {} and more {}", arg1, arg2)
+```
 
-It is very difficult to unit test this type of code, instead we will rely on a detailed
-logger to debug this program.
-
-Please use `env_logger` (same as last assignment) to print helpful messages about what
-is happening in your code. Use the `info!` macro to print extra messages. An example
-expected output of the logger is below:
+Add logging throughout the program (in `main.rs`, `args.rs`, and `util.rs`),
+wherever you see fit, or where there are interesting events.
+An example
+possible output of the logger is below:
 ```
 $> RUST_LOG=stracer=info cargo run ls
  INFO 2018-10-16T17:14:56Z: stracer: Pre-hook event. Nothing to do.
@@ -245,145 +400,91 @@ Your logger should similarly print messages for the following events:
 pre-hook events, post-hook events, exit, signaled, `ptrace` events, stopped, etc.
 For example: `info!("[{}] Process Killed by Signal {:?}", pid, signal);`
 
-Additionally you must print the string argument for the following system calls:
-`execve`, `access`, `stat`, `lstat`, `chdir` (feel free to add more for funsies).
+You could also print out the string argument for the following system calls:
+`execve`, `access`, `stat`, `lstat`, `chdir` (feel free to add more).
+To do this, edit `handle_pre_syscall`.
 
-## Design and Implementation
+### Extra Credit 2 (20pts): Making your tracer work for multiple processes
 
-Make sure that you run `cargo clippy` and `cargo fmt` and deal with all warnings (yellow text, not just red text) before submitting.
+What we did above (the single loop logger)
+works fine for a single process, but won't work if the process you are
+tracing spawns its own processes!
+To make it work for multiple processes, we should only need
+to edit the `run_tracer` main loop.
 
-It is not enough for your code to work; it should be well written, idiomatic,
-logically separated, and modular. Please do not use giant if-else cascades or one giant main
-function.
-
-### Nix
-
-We will use the nix crate for their ptrace bindings. Specifically you should become
-best friends with `nix::sys::wait::WaitStatus` enum as you will need to handle all
-the cases in this enum.
-
-**Important Note:**
-You must propagate all `nix::Result` errors up to main using `?`; do not use
-unwrap or expect on these. You may use unwrap or expect on other types of error though.
-
-We have provided a couple of utility functions, which are difficult to write:
-```rust
-/// Given an address in a tracee process specified by pid, read a string at
-/// that address.
-pub fn read_string(pid: Pid, address: AddressType) -> String;
-
-/// Given the pid of a process that is currently being traced,
-/// return the registers for that process.
-pub fn get_regs(pid: Pid) -> user_regs_struct;
-```
-
-You will find these useful.
-
-### Structopt
-
-Structopt allows us to declare a struct which specifies our program's command line
-arguments. Structopt takes care of the parsing, and returns an instance of this struct
-which we can simply `instance.field` to get the arguments.
-You should already be familiar with `Structopt` from homework2.
-
-Please put this struct in it's own module and file called `args.rs`. Declare a type
-called `Opt` which defines your command line args. You may find the structopt
-per field attributes: `short`, `long`, `conflicts_with`, useful.
-
-Notice the type of the field tells structopt how to parse the commands. Our `dont_trace`,
-and `to_trace` are of type `Vec<String>`.
-
-### Byteorder
-
-The byteorder trait is used by the provided `util.rs` code; no need to worry about it.
-
-### Using Ptrace
-
-`ptrace` is quite complicated. We will attempt to give some brief pointers here.
-We will go over this in more detail in class.
-
-The tracee starts in a stopped state waiting for the tracer to let it continue.
-In general we use `ptrace(syscall)` to allow the tracee to continue, after that we wait
-for the next `ptrace` event using `waitpid`, `waitpid` returns a `WaitStatus` which we can match
-on to do many things based on the type of event.
-
-#### Starting ptrace
-
-The child should do the following things:
-1. Call `ptrace traceme()` to set itself up for being traced.
-2. Call `raise(SIGSTOP)` --- this basically has the child stop itself until the tracer is ready.
-   This ensures the tracer has time to get set up, otherwise there is a race condition
-   between parent and child. Notice child is stopped here.
-3. Child is continued by parent... (See parent actions below)
-4. Child calls `execvp` to run process.
-
-The parent should do the following things.
-1. Wait for child to be ready by calling `waitpid` on it's `pid` (this waits on the child to send the `SIGSTOP` to itself (see child actions above)).
-2. Call `ptrace_set_options` (provided by me) to properly set up `ptrace` to track all the
-   events we're interested in.
-3. Call `ptrace(syscall, child_pid)` to let it continue (step 3 on the child).
-4. From here the parent and child are ready to work together to trace system calls.
-
-You should set your system tracing loop as follows:
-```rust
-loop {
-    // Wait for any event from any tracee to come.
-    let actual_pid = match waitpid(any_pid) {
-      // Handle all WaitStatus events.
-      Event1 => {
-       ...
-      }
-
-      // The current process has exited.
-      Exited => {
-
-      }
-
-      // A system call event.
-      SystemCallEvent => {
-
-      }
-    }
-
-    // Allow this process to continue running and loop around for next event.
-    ptrace(syscall, actual_pid);
-}
-```
-
-Notice a few things:
-- There is no difference between a post-hook event and a pre-hook event,
-  you will have to keep track of this using `bool`, alternating between them as
-  `SystemCallEvent` come.
-- When does this loop end? When we hit the `Exited` even you can break out of the loop.
-
-This works fine for a single process, but won't scale to multiple processes.
 For this you will need a few more things:
+
 1. You cannot just break out of the loop when a single process exits. You must know all
-   live processes are done, we will need to keep track of this. We recommend a `HashSet`.
+   live processes are done, we will need to keep track of this. We recommend a `HashMap`.
    You should add new processes when you see them, for simplicity, do this at the
     `SystemCallEvent` branch. Delete it once it has exited.
+
 2. A single boolean isn't enough to keep track of the post-hook/pre-hook events; you
-   will need a boolean per live process. recommend a `HashMap` for this. As in (1), for
+   will need a boolean per live process. We recommend a `HashMap` for this. As in (1), for
    never seen processes add an entry in `PtraceSyscall` with the starting value for
    pre-hook event.
 
-An easy command to run which spawns child processes is `bash -c "ls"` if that works,
+You can do both (1) and (2) with a single `HashMap` of the known live processes,
+where the key is the process ID and the value is the Boolean of whether it is
+in a pre-hook or post-hook stage.
+
+**Testing this:** An easy command to run which spawns child processes is `bash -c "ls"` if that works,
 you can try slightly more complicated variant: `bash -c "ls && ls -ahl"`.
 
 **Note**: Getting `ptrace` to work for all processes is very difficult! For example,
 our implementation does not properly propagate signals. Do not expect your final solution
 to work for all programs.
 
-## Recommended Steps for implementation
+## Technical details (you can skip this)
 
-1. Start with a simple command (say `ls`), and hard code this command into the child. Ensure
-   you're able to properly `ptrace` the child, iterating through it's system calls all
-   the way to completion. The only `ptrace` events you should need to handle at this step
-   is the `Exited` and `PtraceSyscall` event.
-2. Implement the command line argument options to allow arbitrary processes to be passed
-   in along with that process's command line arguments. You should only attempt to run
-   programs which themselves don't fork, like `ls`.
-3. Implement multi-processing, this requires a few extensions as explained above. You
-   must be able to handled arbitrary events from arbitrary processes.
-4. Lastly, add the functionality to print only specific events based on what the user
-   provided. `HashSet` is useful for this task.
+Here are some more technical details about what's going on in `util.rs` for the curious; you can skip this otherwise.
+
+### System call return values
+
+The provided tracing code prints the *arguments* and *return value* for system calls done by the tracee.
+When printing a return value,
+most system calls return a result status (typically a small integer like 0 or -1)
+as an argument, but not all. Consider:
+```
+[11942]: close() = 0
+[11942]: openat() = -2
+[11942]: openat() = -2
+[11942]: openat() = -2
+[11942]: openat() = 3
+[11942]: fstat() = 0
+[11942]: mmap() = 0x695ef000
+```
+
+`mmap` returns the address of memory that was mapped, so we follow a simple heuristic:
+If the absolute value of a return value is above 10,000 we assume it is an address and
+print it using hexadecimal format.
+
+### Registers of a stopped process
+
+While the tracee is stopped, we can get it's registers to see the state of the program,
+the system call which was intercepted is defined by the `orig_rax` field, notice this isn't a real CPU register but a Linux quirk. The arguments to
+the system call are mapped to the following registers: `arg1 => rdi`, `arg2 => rsi`,
+`arg3 => rdx`, `arg4 => r10`, `arg5 => r8`, `arg6 => r9`.
+The function `get_regs` gets the register information about the tracee
+and this is how we figure out the system call arguments and return value.
+
+Similarly, the tracer can read/write to arbitrary memory of the tracee.
+This is how
+the provided `read_string` function works;
+it reads from the memory of the tracee,
+in sequences of bytes.
+
+### Byteorder
+
+The byteorder crate is used by the provided `util.rs` code
+to deal with reading
+bytes in `read_string`: this is because
+we have to distinguish between little-endian order and big-endian order.
+This is done through the ByteOrder *trait*,
+which describes types that can be used to read/write integers
+in either of these orders.
+See [here](https://docs.rs/byteorder/1.4.3/byteorder/trait.ByteOrder.html).
+
+## Deadline
+
+This assignment is due on Wednesday, April 20 at 11:59pm.
