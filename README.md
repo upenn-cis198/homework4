@@ -37,9 +37,10 @@ byteorder = "1.4.3"
 I've also added `rustfmt.toml`, feel free to modify or delete it for
 different `cargo fmt` formatting settings.
 
-### Input and Output
+## Assignment
 
-This assignment is a minimal implementation of the `strace` Linux utility. We recommend that you
+This assignment is a minimal implementation of the `strace` Linux utility.
+We recommend that you
 play around with the utility if you're not familiar: just run `strace` followed by any command or program, and it will show what system calls that program is making. For example:
 ```
 strace echo "hello"
@@ -53,7 +54,7 @@ Or even:
 strace strace echo "hello"
 ```
 
-Our stracer will intercept all system call that a program makes.
+Our stracer will intercept all system calls that a program makes.
 Here a "program" is
 understood as: a tree of processes, possibly running in parallel, possibly spawning
 children. A sample output will look like:
