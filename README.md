@@ -488,4 +488,4 @@ See [here](https://docs.rs/byteorder/1.4.3/byteorder/trait.ByteOrder.html).
 
 ## Deadline
 
-This assignment is due on Wednesday, April 20 at 11:59pm.
+This assignment is due on Thursday, April 22 at 11:59pm.
